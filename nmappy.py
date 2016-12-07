@@ -6,8 +6,9 @@ import os.path
 import csv
 from netaddr import *
 import string
+import random
 
-VERSION = 0.40
+VERSION = 0.41
 WEB_URL = 'https://github.com/90sled/nmappy/'
 MAX_RESULTS_DISPLAY = 30
 
@@ -83,22 +84,36 @@ def port_specification(value):
     return ports
 
 
+# OUTPUT
+# Implemented: -oN
+# URL: https://nmap.org/book/man-output.html
+def output_validate(value):
+    if value == 'X':
+        raise argparse.ArgumentTypeError('Currently the XML output option is not supported.')
+
+    return value
+
+
 def parse_arguments():
-    parser = argparse.ArgumentParser(description='NmapPy %.1f ( %s )' % (VERSION, WEB_URL))
+    parser = argparse.ArgumentParser(description='NmapPy %.2f ( %s )' % (VERSION, WEB_URL), add_help=False)
 
     # TARGET SPECIFICATION
-    parser.add_argument('targets',                              action='store', type=target_spec, help='Can pass hostnames, IP addresses, networks, etc.')
+    target = parser.add_argument_group('TARGET SPECIFICATION')
+    target.add_argument('targets',                              action='store', type=target_spec, help='Can pass hostnames, IP addresses, networks, etc.')
 
     # HOST DISCOVERY
     # -
 
     # SCAN TECHNIQUES
-    parser.add_argument('-s',           dest='scan_technique',  action='store', type=scan_technique, choices='TU', default='T', help='TCP Connect()/UDP scan')
+    scantech = parser.add_argument_group('SCAN TECHNIQUES')
+    scantech.add_argument('-s',         dest='scan_technique',  action='store', type=scan_technique, choices='TU', default='T', help='TCP Connect()/UDP scan')
 
     # PORT SPECIFICATION AND SCAN ORDER
-    parser.add_argument('-p',           dest='ports',           action='store', type=port_specification, help='Only scan specified ports')
-    parser.add_argument('--top-ports',  dest='top_ports',       action='store', type=int, default=1000, help='Scan <number> most common ports')
-    parser.add_argument('-F',           dest='top_ports',       action='store_const', default=False, const=100, help='Fast mode - Scan fewer ports than the default scan')
+    portspec = parser.add_argument_group('PORT SPECIFICATION AND SCAN ORDER')
+    portspec.add_argument('-p',         dest='ports',           action='store', type=port_specification, help='Only scan specified ports')
+    portspec.add_argument('--top-ports',dest='top_ports',       action='store', type=int, default=1000, help='Scan <number> most common ports')
+    portspec.add_argument('-F',         dest='top_ports',       action='store_const', default=False, const=100, help='Fast mode - Scan fewer ports than the default scan')
+    portspec.add_argument('-r',         dest='ports_randomize', action='store_false', help='Scan ports consecutively - don\'t randomize')
 
     # SERVICE/VERSION DETECTION
     # -
@@ -110,18 +125,23 @@ def parse_arguments():
     # -
 
     # TIMING AND PERFORMANCE
-    parser.add_argument('-T',           dest='timing',          action='store', type=int, choices=[i for i in xrange(1,6)], default=3, help='Set timing template (higher is faster)')
+    performance = parser.add_argument_group('TIMING AND PERFORMANCE')
+    performance.add_argument('-T',      dest='timing',          action='store', type=int, choices=[i for i in xrange(1,6)], default=3, help='Set timing template (higher is faster)')
 
     # FIREWALL/IDS EVASION AND SPOOFING
     # -
 
     # OUTPUT
-    parser.add_argument('-v',           dest='verbosity',       action='count', default=0, help='Increase verbosity level (use -vv or more for greater effect)')
+    output = parser.add_argument_group('OUTPUT')
+    output.add_argument('-v',           dest='verbosity',       action='count', default=0, help='Increase verbosity level (use -vv or more for greater effect)')
+    output.add_argument('-o',           dest='output_type',     action='store', choices='NX', type=output_validate, help='Output scan in normal/XML')
+    output.add_argument('output_file',  help='File name/location')
 
     # MISC
-    # -
+    misc = parser.add_argument_group('MISC')
+    misc.add_argument('-h', '--help', action='help', help='Print this help summary page.')
 
-    # Always show full help
+    # Always show full help when no arguments are provided
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(1)
@@ -192,6 +212,32 @@ def configure_scan(args):
 
         args.ports = ports
 
+    # Randomize order of ports
+    if args.ports_randomize:
+        random.shuffle(args.ports)
+
+    # Output
+    if args.output_type == 'N':
+        try:
+            f = open(args.output_file, 'w', 0)
+            args.output = f
+        except IOError as e:
+            print "I/O error({0}): {1}".format(e.errno, e.strerror)
+            sys.exit(1)
+
+
+def finish_scan(args):
+    # Close output file handle
+    if args.output:
+        args.output.close()
+
+
+def print_line(line, output):
+    print line
+
+    if output:
+        output.write(line + '\n')
+
 
 def main():
     # Check validity of commandline arguments
@@ -206,11 +252,12 @@ def main():
     try:
         # Header
         start_time = datetime.now()
-        print '\nStarting NmapPy %.1f ( %s ) at %s' % (VERSION, WEB_URL, start_time.strftime('%Y-%m-%d %H:%M %Z%z'))
+        print ''
+        print_line('Starting NmapPy %.2f ( %s ) at %s' % (VERSION, WEB_URL, start_time.strftime('%Y-%m-%d %H:%M %Z%z')), args.output)
 
         for target in sorted(args.targets):
             ip = socket.gethostbyname(target)
-            print 'NmapPy scan report for %s%s' % (target, ' (%s)' % ip if ip != target else '')
+            print_line('NmapPy scan report for %s%s' % (target, ' (%s)' % ip if ip != target else ''), args.output)
 
             # Results
             table = AsciiTable(args.ports)
@@ -223,7 +270,7 @@ def main():
 
                 # Show all if number of ports to check is less than or equal to MAX_RESULTS_DISPLAY
                 if len(args.ports) <= MAX_RESULTS_DISPLAY or args.verbosity > 0 or state:
-                    table.print_line(args.proto, port, state)
+                    table.print_line(args.proto, port, state, args.output)
 
             args.targets[target] = (ip, results)
 
@@ -231,14 +278,16 @@ def main():
             if len(args.ports) > MAX_RESULTS_DISPLAY:
                 hidden = len(args.ports) - len(filter(lambda r: r[1], results))
                 if hidden > 0:
-                    print 'Not shown: %d closed ports' % hidden
-            print ''
+                    print_line('Not shown: %d closed ports' % hidden, args.output)
+            print_line('', args.output)
 
         # Overall summary
         end_time = datetime.now()
         elapsed = (end_time - start_time)
         # TODO: Detect offline hosts
-        print 'NmapPy done: %d IP address (%d host up) scanned in %d.%02d seconds' % (len(args.targets), len(args.targets), elapsed.seconds, elapsed.microseconds/10000)
+        print_line('NmapPy done: %d IP address (%d host up) scanned in %d.%02d seconds' % (len(args.targets), len(args.targets), elapsed.seconds, elapsed.microseconds/10000), args.output)
+
+        finish_scan(args)
 
     except KeyboardInterrupt:
         sys.exit(1)
@@ -256,11 +305,14 @@ class AsciiTable:
         f = '{0: <%d} {1: <6} {2}' % self.maxportwidth
         print f.format('PORT', 'STATE', 'SERVICE')
 
-    def print_line(self, proto, port, state):
+    def print_line(self, proto, port, state, output):
         f = '{0: <%d} {1: <6} {2}' % self.maxportwidth
-        print f.format('%d/%s' % (port, proto),
-                       'open' if state else 'closed',
-                       services_lookup[proto][port] if (proto in services_lookup and port in services_lookup[proto]) else '')
+        print_line(f.format(
+                        '%d/%s' % (port, proto),
+                        'open' if state else 'closed',
+                        services_lookup[proto][port] if (proto in services_lookup and port in services_lookup[proto]) else ''
+                   ),
+                   output)
 
 
 services = [
