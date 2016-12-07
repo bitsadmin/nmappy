@@ -8,9 +8,10 @@ from netaddr import *
 import string
 import random
 
-VERSION = 0.41
+VERSION = 0.42
 WEB_URL = 'https://github.com/90sled/nmappy/'
 MAX_RESULTS_DISPLAY = 30
+ALL_SERVICES_INCLUDED = False
 
 
 # TARGET SPECIFICATION
@@ -135,7 +136,7 @@ def parse_arguments():
     output = parser.add_argument_group('OUTPUT')
     output.add_argument('-v',           dest='verbosity',       action='count', default=0, help='Increase verbosity level (use -vv or more for greater effect)')
     output.add_argument('-o',           dest='output_type',     action='store', choices='NX', type=output_validate, help='Output scan in normal/XML')
-    output.add_argument('output_file',  help='File name/location')
+    output.add_argument('output_file',  help='File name/location', nargs='?')
 
     # MISC
     misc = parser.add_argument_group('MISC')
@@ -169,7 +170,7 @@ def check_port(host, proto, port, timeout):
 
 def read_services():
     # Read services from file, if available; otherwise the (limited) built-in list will be used
-    if os.path.isfile('nmap-services'):
+    if not ALL_SERVICES_INCLUDED and os.path.isfile('nmap-services'):
         sfile = csv.reader(open('nmap-services', 'r'), dialect='excel-tab')
         global services
         services = []
@@ -178,13 +179,6 @@ def read_services():
                 services.append((s[1], s[0], s[2]))
 
         services = sorted(services, key=lambda s: s[2], reverse=True)
-
-    # -----------------------------------------------------------------------
-    # Used to generate the top 50 TCP/UDP for inclusion in the file
-    # top_tcp = filter(lambda s: s[0].endswith('tcp'), services)[:50]
-    # top_udp = filter(lambda s: s[0].endswith('udp'), services)[:50]
-    # combined = sorted(top_tcp + top_udp, key=lambda  s: s[2], reverse=True)
-    # -----------------------------------------------------------------------
 
     # Process list for easier usage
     for s in services:
@@ -224,6 +218,8 @@ def configure_scan(args):
         except IOError as e:
             print "I/O error({0}): {1}".format(e.errno, e.strerror)
             sys.exit(1)
+    else:
+        args.output = None
 
 
 def finish_scan(args):
