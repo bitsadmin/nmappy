@@ -4,22 +4,52 @@ import socket
 import sys
 import os.path
 import csv
+from netaddr import *
+import string
 
-VERSION = 0.2
+VERSION = 0.3
 WEB_URL = 'https://github.com/90sled/nmappy/'
 MAX_RESULTS_DISPLAY = 30
 
 
 class Arguments:
     def __init__(self, target, top_ports, ports, timing, verbosity, scan_technique):
-        # Target
-        self.targetname = target
-        self.targetip = socket.gethostbyname(target)
+        # Target Specification - https://nmap.org/book/man-target-specification.html
+        self.targets = {}
+        octets = target.split('.')
 
-        # Scan type (-sT or -sU)
+        # IP address is specified
+        contains_invalid_char = [char not in string.digits + '/-,' for octet in octets for char in octet]
+        if len(octets) == 4 and True not in contains_invalid_char:
+            # - 192.168.0.0/24
+            if '/' in octets[3]:
+                cidr = IPNetwork(target)
+                self.targets = {key: (None, None) for key in [str(ip) for ip in cidr[1:-1]]}
+            # - 192.168.0.1-254
+            # - 192.168.3-5,7.1 - TODO
+            elif '-' in octets[3]:
+                (ip_start, ip_end) = map(int, octets[3].split('-'))
+                self.targets = {key: (None, None) for key in ['.'.join(octets[0:3] + [str(host)]) for host in xrange(ip_start, ip_end+1)]}
+            # 192.168.0.1,103,104
+            elif ',' in octets[3]:
+                self.targets = {key: (None, None) for key in ['.'.join(octets[0:3] + [str(host)]) for host in octets[3].split(',')]}
+            # - 192.168.0.*
+            # - 192.168.*.*
+            elif '*' in octets:
+                ips = [[i for i in xrange(1,255)] if octet == '*' else [octet] for octet in octets]
+                self.targets = {key: (None, None) for key in ['.'.join(map(str, [a,b,c,d])) for a in ips[0] for b in ips[1] for c in ips[2] for d in ips[3]]}
+            # - 192.168.0.1
+            else:
+                self.targets = {target: (None, None)}
+        # Hostname is specified
+        # - myserver.me
+        else:
+            self.targets = {target: (None, None)}
+
+        # Port Scanning Techniques (-sT or -sU) - https://nmap.org/book/man-port-scanning-techniques.html
         self.proto = 'tcp' if scan_technique == 'T' else 'udp'
 
-        # Ports (-p) and (--top-ports)
+        # Ports Specification and Scan Order (-p) and (--top-ports) - https://nmap.org/book/man-port-specification.html
         self.ports = []
         # Use specified ports
         if ports is not None and len(ports) > 0:
@@ -72,6 +102,7 @@ def pre_parse_arguments():
     parser.add_argument('-s', dest='scan_technique', action='store', choices='TU', default='T', help='TCP Connect()/UDP scan')
     parser.add_argument('-p', dest='ports', action='store', help='Only scan specified ports')
     parser.add_argument('--top-ports', dest='top_ports', type=int, default=1000, action='store', help='Scan <number> most common ports')
+    parser.add_argument('-F', dest='top_ports', action='store_const', default=False, const=100, help='Fast mode - Scan fewer ports than the default scan')
     parser.add_argument('-T', dest='timing', type=int, choices=[i for i in xrange(1,6)], default=3, action='store', help='Set timing template (higher is faster)')
     parser.add_argument('-v', dest='verbosity', default=0, action='count', help='Increase verbosity level (use -vv or more for greater effect)')
     return parser.parse_args()
@@ -140,32 +171,39 @@ def main():
         # Header
         start_time = datetime.now()
         print '\nStarting NmapPy %.1f ( %s ) at %s' % (VERSION, WEB_URL, start_time.strftime('%Y-%m-%d %H:%M %Z%z'))
-        print 'NmapPy scan report for %s%s' % (args.targetname, ' (%s)' % args.targetip if args.targetip != args.targetname else '')
 
-        # Results
-        table = AsciiTable(args.ports)
-        table.print_heading()
-        results = []
-        for port in args.ports:
-            # Perform check and store result
-            state = check_port(args.targetip, args.proto, port, args.timing)
-            results.append([port, state])
+        for target in sorted(args.targets):
+            ip = socket.gethostbyname(target)
+            print 'NmapPy scan report for %s%s' % (target, ' (%s)' % ip if ip != target else '')
 
-            # Show all if number of ports to check is less than or equal to MAX_RESULTS_DISPLAY
-            if len(args.ports) <= MAX_RESULTS_DISPLAY or args.verbosity > 0 or state:
-                table.print_line(args.proto, port, state)
+            # Results
+            table = AsciiTable(args.ports)
+            table.print_heading()
+            results = []
+            for port in args.ports:
+                # Perform check and store result
+                state = check_port(ip, args.proto, port, args.timing)
+                results.append([port, state])
 
-        # Summary
-        # - Closed ports
-        if len(args.ports) > MAX_RESULTS_DISPLAY:
-            hidden = len(args.ports) - len(filter(lambda r: r[1], results))
-            if hidden > 0:
-                print 'Not shown: %d closed ports' % hidden
+                # Show all if number of ports to check is less than or equal to MAX_RESULTS_DISPLAY
+                if len(args.ports) <= MAX_RESULTS_DISPLAY or args.verbosity > 0 or state:
+                    table.print_line(args.proto, port, state)
+
+            args.targets[target] = (ip, results)
+
+            # Summary
+            # - Closed ports
+            if len(args.ports) > MAX_RESULTS_DISPLAY:
+                hidden = len(args.ports) - len(filter(lambda r: r[1], results))
+                if hidden > 0:
+                    print 'Not shown: %d closed ports' % hidden
+            print ''
 
         # - Hosts
         end_time = datetime.now()
         elapsed = (end_time - start_time)
-        print '\nNmapPy done: %d IP address (%d host up) scanned in %d.%02d seconds' % (1, 1, elapsed.seconds, elapsed.microseconds/10000)
+        # TODO: Detect offline hosts
+        print 'NmapPy done: %d IP address (%d host up) scanned in %d.%02d seconds' % (len(args.targets), len(args.targets), elapsed.seconds, elapsed.microseconds/10000)
 
     except KeyboardInterrupt:
         sys.exit(1)
