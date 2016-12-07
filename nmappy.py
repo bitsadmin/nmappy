@@ -7,109 +7,126 @@ import csv
 from netaddr import *
 import string
 
-VERSION = 0.3
+VERSION = 0.40
 WEB_URL = 'https://github.com/90sled/nmappy/'
 MAX_RESULTS_DISPLAY = 30
 
 
-class Arguments:
-    def __init__(self, target, top_ports, ports, timing, verbosity, scan_technique):
-        # Target Specification - https://nmap.org/book/man-target-specification.html
-        self.targets = {}
-        octets = target.split('.')
+# TARGET SPECIFICATION
+# URL: https://nmap.org/book/man-target-specification.html
+def target_spec(value):
+    targets = {}
+    octets = value.split('.')
 
-        # IP address is specified
-        contains_invalid_char = [char not in string.digits + '/-,' for octet in octets for char in octet]
-        if len(octets) == 4 and True not in contains_invalid_char:
-            # - 192.168.0.0/24
-            if '/' in octets[3]:
-                cidr = IPNetwork(target)
-                self.targets = {key: (None, None) for key in [str(ip) for ip in cidr[1:-1]]}
-            # - 192.168.0.1-254
-            # - 192.168.3-5,7.1 - TODO
-            elif '-' in octets[3]:
-                (ip_start, ip_end) = map(int, octets[3].split('-'))
-                self.targets = {key: (None, None) for key in ['.'.join(octets[0:3] + [str(host)]) for host in xrange(ip_start, ip_end+1)]}
-            # 192.168.0.1,103,104
-            elif ',' in octets[3]:
-                self.targets = {key: (None, None) for key in ['.'.join(octets[0:3] + [str(host)]) for host in octets[3].split(',')]}
-            # - 192.168.0.*
-            # - 192.168.*.*
-            elif '*' in octets:
-                ips = [[i for i in xrange(1,255)] if octet == '*' else [octet] for octet in octets]
-                self.targets = {key: (None, None) for key in ['.'.join(map(str, [a,b,c,d])) for a in ips[0] for b in ips[1] for c in ips[2] for d in ips[3]]}
-            # - 192.168.0.1
+    # IP address is specified
+    contains_invalid_char = [char not in string.digits + '/-,' for octet in octets for char in octet]
+    if len(octets) == 4 and True not in contains_invalid_char:
+        # - 192.168.0.0/24
+        if '/' in octets[3]:
+            cidr = IPNetwork(value)
+            targets = {key: (None, None) for key in [str(ip) for ip in cidr[1:-1]]}
+        # - 192.168.0.1-254
+        # - 192.168.3-5,7.1 - TODO
+        elif '-' in octets[3]:
+            (ip_start, ip_end) = map(int, octets[3].split('-'))
+            targets = {key: (None, None) for key in
+                            ['.'.join(octets[0:3] + [str(host)]) for host in xrange(ip_start, ip_end + 1)]}
+        # 192.168.0.1,103,104
+        elif ',' in octets[3]:
+            targets = {key: (None, None) for key in
+                            ['.'.join(octets[0:3] + [str(host)]) for host in octets[3].split(',')]}
+        # - 192.168.0.*
+        # - 192.168.*.*
+        elif '*' in octets:
+            ips = [[i for i in xrange(1, 255)] if octet == '*' else [octet] for octet in octets]
+            targets = {key: (None, None) for key in
+                            ['.'.join(map(str, [a, b, c, d])) for a in ips[0] for b in ips[1] for c in ips[2] for d in
+                             ips[3]]}
+        # - 192.168.0.1
+        else:
+            targets = {value: (None, None)}
+    # Hostname is specified
+    # - myserver.me
+    else:
+        targets = {value: (None, None)}
+
+    return targets
+
+
+# SCAN TECHNIQUES
+# Implemented: -sT, -sU
+# URL: https://nmap.org/book/man-port-scanning-techniques.html
+def scan_technique(value):
+    if len(value) > 1:
+        raise argparse.ArgumentTypeError('Currently a combination of TCP and UDP is not supported.')
+
+    return value
+
+
+# PORT SPECIFICATION AND SCAN ORDER
+# Implemented: -p, --top-ports
+# URL: https://nmap.org/book/man-port-specification.html
+def port_specification(value):
+    ports = []
+    # Use specified ports
+    if len(value) > 0:
+        for part in value.split(','):
+            # Port range
+            if '-' in part:
+                range = map(int, part.split('-'))
+                for p in xrange(range[0], range[1] + 1):
+                    ports.append(p)
+            # Single port
             else:
-                self.targets = {target: (None, None)}
-        # Hostname is specified
-        # - myserver.me
-        else:
-            self.targets = {target: (None, None)}
+                ports.append(int(part))
 
-        # Port Scanning Techniques (-sT or -sU) - https://nmap.org/book/man-port-scanning-techniques.html
-        self.proto = 'tcp' if scan_technique == 'T' else 'udp'
-
-        # Ports Specification and Scan Order (-p) and (--top-ports) - https://nmap.org/book/man-port-specification.html
-        self.ports = []
-        # Use specified ports
-        if ports is not None and len(ports) > 0:
-            for part in ports.split(','):
-                # Port range
-                if '-' in part:
-                    range = map(int, part.split('-'))
-                    for p in xrange(range[0], range[1] + 1):
-                        self.ports.append(p)
-                # Single port
-                else:
-                    self.ports.append(int(part))
-        # Use top-ports
-        else:
-            for s in services_top[self.proto]:
-                self.ports.append(s)
-
-                if len(self.ports) == top_ports:
-                    break
-
-        # Timing (-T)
-        self.timing = timing
-
-        # Verbosity
-        self.verbosity = verbosity
+    return ports
 
 
-class AsciiTable:
-    def __init__(self, ports=None):
-        # Estimate the maximum width required for the PORT column
-        if not ports:
-            self.maxportwidth = len('65535/tcp')
-        else:
-            self.maxportwidth = len('%d/tcp' % max(ports))
-
-    def print_heading(self):
-        f = '{0: <%d} {1: <6} {2}' % self.maxportwidth
-        print f.format('PORT', 'STATE', 'SERVICE')
-
-    def print_line(self, proto, port, state):
-        f = '{0: <%d} {1: <6} {2}' % self.maxportwidth
-        print f.format('%d/%s' % (port, proto),
-                       'open' if state else 'closed',
-                       services_lookup[proto][port] if (proto in services_lookup and port in services_lookup[proto]) else '')
-
-
-def pre_parse_arguments():
+def parse_arguments():
     parser = argparse.ArgumentParser(description='NmapPy %.1f ( %s )' % (VERSION, WEB_URL))
-    parser.add_argument('target', action='store', help='Can pass hostnames, IP addresses, networks, etc.')
-    parser.add_argument('-s', dest='scan_technique', action='store', choices='TU', default='T', help='TCP Connect()/UDP scan')
-    parser.add_argument('-p', dest='ports', action='store', help='Only scan specified ports')
-    parser.add_argument('--top-ports', dest='top_ports', type=int, default=1000, action='store', help='Scan <number> most common ports')
-    parser.add_argument('-F', dest='top_ports', action='store_const', default=False, const=100, help='Fast mode - Scan fewer ports than the default scan')
-    parser.add_argument('-T', dest='timing', type=int, choices=[i for i in xrange(1,6)], default=3, action='store', help='Set timing template (higher is faster)')
-    parser.add_argument('-v', dest='verbosity', default=0, action='count', help='Increase verbosity level (use -vv or more for greater effect)')
+
+    # TARGET SPECIFICATION
+    parser.add_argument('targets',                              action='store', type=target_spec, help='Can pass hostnames, IP addresses, networks, etc.')
+
+    # HOST DISCOVERY
+    # -
+
+    # SCAN TECHNIQUES
+    parser.add_argument('-s',           dest='scan_technique',  action='store', type=scan_technique, choices='TU', default='T', help='TCP Connect()/UDP scan')
+
+    # PORT SPECIFICATION AND SCAN ORDER
+    parser.add_argument('-p',           dest='ports',           action='store', type=port_specification, help='Only scan specified ports')
+    parser.add_argument('--top-ports',  dest='top_ports',       action='store', type=int, default=1000, help='Scan <number> most common ports')
+    parser.add_argument('-F',           dest='top_ports',       action='store_const', default=False, const=100, help='Fast mode - Scan fewer ports than the default scan')
+
+    # SERVICE/VERSION DETECTION
+    # -
+
+    # SCRIPT SCAN
+    # -
+
+    # OS DETECTION
+    # -
+
+    # TIMING AND PERFORMANCE
+    parser.add_argument('-T',           dest='timing',          action='store', type=int, choices=[i for i in xrange(1,6)], default=3, help='Set timing template (higher is faster)')
+
+    # FIREWALL/IDS EVASION AND SPOOFING
+    # -
+
+    # OUTPUT
+    parser.add_argument('-v',           dest='verbosity',       action='count', default=0, help='Increase verbosity level (use -vv or more for greater effect)')
+
+    # MISC
+    # -
+
+    # Always show full help
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+
     return parser.parse_args()
-
-
-def parse_arguments(args):
-    return Arguments(args.target, args.top_ports, args.ports, args.timing, args.verbosity, args.scan_technique)
 
 
 def check_port(host, proto, port, timeout):
@@ -157,15 +174,34 @@ def read_services():
         services_top[proto].append(port)
 
 
+def configure_scan(args):
+    # Determine protocol based on Port Scanning Technique
+    if args.scan_technique == 'T':
+        args.proto = 'tcp'
+    else:
+        args.proto = 'udp'
+
+    # In case no ports are provided, use top-ports
+    if not args.ports:
+        ports = []
+        for s in services_top[args.proto]:
+            ports.append(s)
+
+            if len(ports) == args.top_ports:
+                break
+
+        args.ports = ports
+
+
 def main():
-    # Check syntactic validity of commandline arguments
-    args = pre_parse_arguments()
+    # Check validity of commandline arguments
+    args = parse_arguments()
 
     # Prepare services list
     read_services()
 
-    # Process arguments
-    args = parse_arguments(args)
+    # Configure scan
+    configure_scan(args)
 
     try:
         # Header
@@ -191,15 +227,14 @@ def main():
 
             args.targets[target] = (ip, results)
 
-            # Summary
-            # - Closed ports
+            # Summary per host: Closed ports
             if len(args.ports) > MAX_RESULTS_DISPLAY:
                 hidden = len(args.ports) - len(filter(lambda r: r[1], results))
                 if hidden > 0:
                     print 'Not shown: %d closed ports' % hidden
             print ''
 
-        # - Hosts
+        # Overall summary
         end_time = datetime.now()
         elapsed = (end_time - start_time)
         # TODO: Detect offline hosts
@@ -207,6 +242,25 @@ def main():
 
     except KeyboardInterrupt:
         sys.exit(1)
+
+
+class AsciiTable:
+    def __init__(self, ports=None):
+        # Estimate the maximum width required for the PORT column
+        if not ports:
+            self.maxportwidth = len('65535/tcp')
+        else:
+            self.maxportwidth = len('%d/tcp' % max(ports))
+
+    def print_heading(self):
+        f = '{0: <%d} {1: <6} {2}' % self.maxportwidth
+        print f.format('PORT', 'STATE', 'SERVICE')
+
+    def print_line(self, proto, port, state):
+        f = '{0: <%d} {1: <6} {2}' % self.maxportwidth
+        print f.format('%d/%s' % (port, proto),
+                       'open' if state else 'closed',
+                       services_lookup[proto][port] if (proto in services_lookup and port in services_lookup[proto]) else '')
 
 
 services = [
