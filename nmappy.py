@@ -79,6 +79,8 @@ def read_input_list(args):
 # Implemented: -sT, -sU
 # URL: https://nmap.org/book/man-port-scanning-techniques.html
 def scan_technique(value):
+    if value == 'U':
+        raise argparse.ArgumentTypeError('UDP is not supported at this moment.')
     if len(value) > 1:
         raise argparse.ArgumentTypeError('Currently a combination of TCP and UDP is not supported.')
 
@@ -131,7 +133,7 @@ def parse_arguments():
 
     # SCAN TECHNIQUES
     scantech = parser.add_argument_group('SCAN TECHNIQUES')
-    scantech.add_argument('-s',         dest='scan_technique',  action='store', type=scan_technique, choices='TU', default='T', help='TCP Connect()/UDP scan')
+    scantech.add_argument('-s',         dest='scan_technique',  action='store', type=scan_technique, choices='TU', default='T', help='TCP Connect()/UDP scan (not implemented)')
 
     # PORT SPECIFICATION AND SCAN ORDER
     portspec = parser.add_argument_group('PORT SPECIFICATION AND SCAN ORDER')
@@ -159,7 +161,7 @@ def parse_arguments():
     # OUTPUT
     output = parser.add_argument_group('OUTPUT')
     output.add_argument('-v',           dest='verbosity',       action='count', default=0, help='Increase verbosity level (use -vv or more for greater effect)')
-    output.add_argument('-o',           dest='output_type',     action='store', choices='NX', type=output_validate, help='Output scan in normal/XML')
+    output.add_argument('-o',           dest='output_type',     action='store', choices='NX', type=output_validate, help='Output scan in normal/XML (not implemented)')
     output.add_argument('output_file',  help='File name/location', nargs='?')
 
     # MISC
