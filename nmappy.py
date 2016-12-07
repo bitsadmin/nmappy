@@ -5,31 +5,40 @@ import sys
 import os.path
 import csv
 
-VERSION = 0.1
-WEBURL = 'https://github.com/90sled/nmappy/'
+VERSION = 0.2
+WEB_URL = 'https://github.com/90sled/nmappy/'
 MAX_RESULTS_DISPLAY = 30
 
 
 class Arguments:
-    def __init__(self, target, ports, timing, verbosity, scantechnique):
+    def __init__(self, target, top_ports, ports, timing, verbosity, scan_technique):
         # Target
         self.targetname = target
         self.targetip = socket.gethostbyname(target)
 
         # Scan type (-sT or -sU)
-        self.proto = 'tcp' if scantechnique == 'T' else 'udp'
+        self.proto = 'tcp' if scan_technique == 'T' else 'udp'
 
-        # Ports (-p)
+        # Ports (-p) and (--top-ports)
         self.ports = []
-        for part in ports.split(','):
-            # Port range
-            if '-' in part:
-                range = map(int, part.split('-'))
-                for p in xrange(range[0], range[1] + 1):
-                    self.ports.append(p)
-            # Single port
-            else:
-                self.ports.append(int(part))
+        # Use specified ports
+        if ports is not None and len(ports) > 0:
+            for part in ports.split(','):
+                # Port range
+                if '-' in part:
+                    range = map(int, part.split('-'))
+                    for p in xrange(range[0], range[1] + 1):
+                        self.ports.append(p)
+                # Single port
+                else:
+                    self.ports.append(int(part))
+        # Use top-ports
+        else:
+            for s in services_top[self.proto]:
+                self.ports.append(s)
+
+                if len(self.ports) == top_ports:
+                    break
 
         # Timing (-T)
         self.timing = timing
@@ -40,6 +49,7 @@ class Arguments:
 
 class AsciiTable:
     def __init__(self, ports=None):
+        # Estimate the maximum width required for the PORT column
         if not ports:
             self.maxportwidth = len('65535/tcp')
         else:
@@ -56,15 +66,19 @@ class AsciiTable:
                        services_lookup[proto][port] if (proto in services_lookup and port in services_lookup[proto]) else '')
 
 
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='NmapPy %.1f ( %s )' % (VERSION, WEBURL))
+def pre_parse_arguments():
+    parser = argparse.ArgumentParser(description='NmapPy %.1f ( %s )' % (VERSION, WEB_URL))
     parser.add_argument('target', action='store', help='Can pass hostnames, IP addresses, networks, etc.')
-    parser.add_argument('-s', dest='scantechnique', action='store', choices='TU', default='T', help='TCP Connect()/UDP scan')
-    parser.add_argument('-p', dest='ports', action='store', help='Only scan specified ports', required=True)
+    parser.add_argument('-s', dest='scan_technique', action='store', choices='TU', default='T', help='TCP Connect()/UDP scan')
+    parser.add_argument('-p', dest='ports', action='store', help='Only scan specified ports')
+    parser.add_argument('--top-ports', dest='top_ports', type=int, default=1000, action='store', help='Scan <number> most common ports')
     parser.add_argument('-T', dest='timing', type=int, choices=[i for i in xrange(1,6)], default=3, action='store', help='Set timing template (higher is faster)')
     parser.add_argument('-v', dest='verbosity', default=0, action='count', help='Increase verbosity level (use -vv or more for greater effect)')
-    args = parser.parse_args()
-    return Arguments(args.target, args.ports, args.timing, args.verbosity, args.scantechnique)
+    return parser.parse_args()
+
+
+def parse_arguments(args):
+    return Arguments(args.target, args.top_ports, args.ports, args.timing, args.verbosity, args.scan_technique)
 
 
 def check_port(host, proto, port, timeout):
@@ -113,15 +127,19 @@ def read_services():
 
 
 def main():
-    # Parse commandline arguments
-    args = parse_arguments()
+    # Check syntactic validity of commandline arguments
+    args = pre_parse_arguments()
 
     # Prepare services list
     read_services()
 
+    # Process arguments
+    args = parse_arguments(args)
+
     try:
         # Header
-        print '\nStarting NmapPy %.1f ( %s ) at %s' % (VERSION, WEBURL, datetime.today().strftime('%Y-%m-%d %H:%M %Z%z'))
+        start_time = datetime.now()
+        print '\nStarting NmapPy %.1f ( %s ) at %s' % (VERSION, WEB_URL, start_time.strftime('%Y-%m-%d %H:%M %Z%z'))
         print 'NmapPy scan report for %s%s' % (args.targetname, ' (%s)' % args.targetip if args.targetip != args.targetname else '')
 
         # Results
@@ -137,11 +155,18 @@ def main():
             if len(args.ports) <= MAX_RESULTS_DISPLAY or args.verbosity > 0 or state:
                 table.print_line(args.proto, port, state)
 
-        # Closed port summary
+        # Summary
+        # - Closed ports
         if len(args.ports) > MAX_RESULTS_DISPLAY:
-            hidden = len(args.ports) - len(results)
+            hidden = len(args.ports) - len(filter(lambda r: r[1], results))
             if hidden > 0:
                 print 'Not shown: %d closed ports' % hidden
+
+        # - Hosts
+        end_time = datetime.now()
+        elapsed = (end_time - start_time)
+        print '\nNmapPy done: %d IP address (%d host up) scanned in %d.%02d seconds' % (1, 1, elapsed.seconds, elapsed.microseconds/10000)
+
     except KeyboardInterrupt:
         sys.exit(1)
 
