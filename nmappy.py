@@ -1,8 +1,18 @@
+#!/usr/bin/python
+#
+# This software is provided under under the BSD 3-Clause License.
+# See the accompanying LICENSE file for more information.
+#
+# Python implementation of Nmap
+#
+# Author:
+#  Arris Huijgen
+
 import argparse, socket, sys, os.path, csv, string, random, subprocess, re
 from datetime import datetime
 from netaddr import *
 
-VERSION = 0.5
+VERSION = 0.51
 WEB_URL = 'https://github.com/90sled/nmappy/'
 MAX_RESULTS_DISPLAY = 30
 ALL_SERVICES_INCLUDED = False
@@ -20,31 +30,47 @@ def target_spec(value):
         # - 192.168.0.0/24
         if '/' in octets[3]:
             cidr = IPNetwork(value)
-            targets = {key: (None, None) for key in [str(ip) for ip in cidr[1:-1]]}
+            targets = {key: None for key in [str(ip) for ip in cidr[1:-1]]}
         # - 192.168.0.1-254
         # - 192.168.3-5,7.1 - TODO
         elif '-' in octets[3]:
             (ip_start, ip_end) = map(int, octets[3].split('-'))
-            targets = {key: (None, None) for key in
+            targets = {key: None for key in
                             ['.'.join(octets[0:3] + [str(host)]) for host in xrange(ip_start, ip_end + 1)]}
         # 192.168.0.1,103,104
         elif ',' in octets[3]:
-            targets = {key: (None, None) for key in
+            targets = {key: None for key in
                             ['.'.join(octets[0:3] + [str(host)]) for host in octets[3].split(',')]}
         # - 192.168.0.*
         # - 192.168.*.*
         elif '*' in octets:
             ips = [[i for i in xrange(1, 255)] if octet == '*' else [octet] for octet in octets]
-            targets = {key: (None, None) for key in
+            targets = {key: None for key in
                             ['.'.join(map(str, [a, b, c, d])) for a in ips[0] for b in ips[1] for c in ips[2] for d in
                              ips[3]]}
         # - 192.168.0.1
         else:
-            targets = {value: (None, None)}
+            targets = {value: None}
     # Hostname is specified
     # - myserver.me
     else:
-        targets = {value: (None, None)}
+        targets = {value: None}
+
+    return targets
+
+
+def check_file_exists(value):
+    if not os.path.isfile(value):
+        raise argparse.ArgumentTypeError('File \'%s\' does not exist.' % value)
+
+    return value
+
+
+def read_input_list(args):
+    targets = {}
+    with open(args.input_filename, 'r') as input:
+        for line in input:
+            dict.update(targets, target_spec(line.strip()))
 
     return targets
 
@@ -94,12 +120,14 @@ def parse_arguments():
 
     # TARGET SPECIFICATION
     target = parser.add_argument_group('TARGET SPECIFICATION')
-    target.add_argument('targets',                              action='store', type=target_spec, help='Can pass hostnames, IP addresses, networks, etc.')
+    input_options = target.add_mutually_exclusive_group(required=True)
+    input_options.add_argument('targets',                       action='store', nargs='?', type=target_spec, help='Can pass hostnames, IP addresses, networks, etc.')
+    input_options.add_argument('-iL',   dest='input_filename',  action='store', nargs='?', default=None, help='Input from list of hosts/networks')
 
     # HOST DISCOVERY
     discovery = parser.add_argument_group('HOST DISCOVERY')
     discovery.add_argument('-Pn',       dest='skip_host_discovery', action='store_true', help='Treat all hosts as online -- skip host discovery')
-    discovery.add_argument('-sn',       dest='ping_scan', action='store_true', help='Ping Scan - disable port scan')
+    discovery.add_argument('-sn',       dest='ping_scan',       action='store_true', help='Ping Scan - disable port scan')
 
     # SCAN TECHNIQUES
     scantech = parser.add_argument_group('SCAN TECHNIQUES')
@@ -149,13 +177,13 @@ def parse_arguments():
 def ping(ip, timing):
     # Windows (win32)
     if sys.platform == 'win32':
-        cmd = ['ping', '-n', '1', '-w', str(1000/timing), ip]
+        cmd = ['ping', '-n', '1', '-w', str(2000/timing), ip]
         # Success: Reply from 127.0.0.1: bytes=32 time<1ms TTL=128
         # Fail: Request timed out.
-        pattern = '^Reply from ([0-9]{1,3}\.?){4}: bytes=[0-9]+ time<(?P<MS>([0-9]+))ms TTL=[0-9]+\r$'
+        pattern = '^Reply from ([0-9]{1,3}\.?){4}: bytes=[0-9]+ time[=<]?(?P<MS>([0-9]+))ms TTL=[0-9]+\r$'
     # Linux (linux2)
     else:
-        cmd = ['timeout', '%.2f' % (1/timing), 'ping', '-s', '24', '-c', '1', ip]
+        cmd = ['timeout', '%.2f' % (2.0/timing), 'ping', '-s', '24', '-c', '1', ip]
         # Success: 1 packets transmitted, 1 received, 0% packet loss, time 0ms
         # Fail: [empty]
         pattern = '^1 packets transmitted, 1 received, 0% packet loss, time (?P<MS>([0-9]+))ms$'
@@ -187,17 +215,11 @@ def check_port(host, proto, port, timeout):
         sock.settimeout(1.0/timeout)
         r = sock.connect_ex((host, port))
 
-        # TODO: Check if distinction between open/closed/filtered can be made
-        # 0 = open
-        # 10035 = filtered (No ACK response to SYN/ACK)
-        # 10061 = closed (RST response to SYN/ACK)
-        # "C:\Program Files (x86)\Windows Kits\8.1\Include\um\winsock.h" -> WSABASEERR
-
         if r == 0:
             result = True
 
         sock.close()
-    except Exception, e:
+    except Exception:
         pass
 
     return result
@@ -224,6 +246,10 @@ def read_services():
 
 
 def configure_scan(args):
+    # If -iL (input list) is provided, fill targets based on this
+    if args.input_filename is not None:
+        args.targets = read_input_list(args)
+
     # Determine protocol based on Port Scanning Technique
     if args.scan_technique == 'T':
         args.proto = 'tcp'
@@ -286,13 +312,15 @@ def main():
         print ''
         print_line('Starting NmapPy %.2f ( %s ) at %s' % (VERSION, WEB_URL, start_time.strftime('%Y-%m-%d %H:%M %Z%z')), args.output)
 
-        for target in sorted(args.targets): # TODO: fix order (i.e. .28 is after .254)
+        targets_sorted = sorted(args.targets.keys(), key=lambda i: socket.inet_aton(i) if re.match('([0-9]{1,3}\.?){4}', i) is not None else '')
+        for target in targets_sorted:
             ip = socket.gethostbyname(target)
 
             # HOST DISCOVERY
-            # Skip discovery if -Pn is set
             ms = 0 # -1 = down; 0 = (forced) up; >0 = up with latency
             report_line = 'NmapPy scan report for %s%s' % (target, ' (%s)' % ip if ip != target else '')
+
+            # Skip discovery if -Pn is set
             if not args.skip_host_discovery:
                 ms = ping(ip, args.timing)
 
@@ -301,17 +329,15 @@ def main():
                     # If only one host is scanned, display info line
                     if len(args.targets) == 1:
                         print_line('Note: Host seems down. If it is really up, but blocking our ping probes, try -Pn', args.output)
-                    # In case of multiple hosts, skip host when not responding to ICMP
-                    else:
-                        args.targets[target] = (ip, -1, [])
-                        continue
+
+                    # Store info that host is down
+                    args.targets[target] = (ip, ms, [])
+
+                    # Continue to next host, which results a scan finished in case only one host is scanned
+                    continue
                 # Host is up
                 else:
                     print_line(report_line, args.output)
-
-                    # Don't scan ports in case of ping scan
-                    if args.ping_scan:
-                        continue
             else:
                 print_line(report_line, args.output)
 
@@ -321,7 +347,11 @@ def main():
                 latency = ' (%.2fs latency)' % (ms / 1000.0)
             print_line('Host is up%s.' % latency, args.output)
 
-            # SCAN
+            # Skip port scan in case of ping scan
+            if args.ping_scan:
+                continue
+
+            # PORT SCAN
             table = AsciiTable(args.ports)
             table.print_heading()
             results = []
@@ -392,7 +422,7 @@ class AsciiTable:
                    ),
                    output)
 
-
+# nmap-services (C) 1996-2011 by Insecure.Com LLC.
 services = [
     ('80/tcp', 'http', '0.484143'),
     ('631/udp', 'ipp', '0.450281'),
