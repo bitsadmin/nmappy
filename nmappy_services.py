@@ -3,7 +3,7 @@
 # This software is provided under under the BSD 3-Clause License.
 # See the accompanying LICENSE file for more information.
 #
-# Python implementation of Nmap
+# Utility to integrate list top services from the nmap-services file into the nmappy.py file.
 #
 # Author:
 #  Arris Huijgen

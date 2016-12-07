@@ -32,7 +32,6 @@ def target_spec(value):
             cidr = IPNetwork(value)
             targets = {key: None for key in [str(ip) for ip in cidr[1:-1]]}
         # - 192.168.0.1-254
-        # - 192.168.3-5,7.1 - TODO
         elif '-' in octets[3]:
             (ip_start, ip_end) = map(int, octets[3].split('-'))
             targets = {key: None for key in
@@ -124,7 +123,7 @@ def parse_arguments():
     target = parser.add_argument_group('TARGET SPECIFICATION')
     input_options = target.add_mutually_exclusive_group(required=True)
     input_options.add_argument('targets',                       action='store', nargs='?', type=target_spec, help='Can pass hostnames, IP addresses, networks, etc.')
-    input_options.add_argument('-iL',   dest='input_filename',  action='store', nargs='?', default=None, help='Input from list of hosts/networks')
+    input_options.add_argument('-iL',   dest='input_filename',  action='store', nargs='?', type=check_file_exists, default=None, help='Input from list of hosts/networks')
 
     # HOST DISCOVERY
     discovery = parser.add_argument_group('HOST DISCOVERY')
