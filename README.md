@@ -15,7 +15,7 @@ usage: nmappy.py [-iL [INPUT_FILENAME]] [-Pn] [-sn] [-s {T,U}] [-p PORTS]
                  [-o {N,X}] [-h]
                  [targets] [output_file]
 
-NmapPy 0.51 ( https://github.com/90sled/nmappy/ )
+NmapPy 0.51 ( https://github.com/bitsadmin/nmappy/ )
 
 TARGET SPECIFICATION:
   targets               Can pass hostnames, IP addresses, networks, etc.
@@ -55,7 +55,7 @@ _Utility to integrate list top services from the nmap-services file into the nma
 ```
 usage: nmappy_services.py [-h] [-i NUMBER] [nmappy_file] [nmap_services_file]
 
-NmapPy services includer 0.10 ( https://github.com/90sled/nmappy/ )
+NmapPy services includer 0.10 ( https://github.com/bitsadmin/nmappy/ )
 
 positional arguments:
   nmappy_file           File to patch
