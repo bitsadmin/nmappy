@@ -11,7 +11,7 @@
 import os, sys, argparse, csv, re
 
 VERSION = 0.1
-WEB_URL = 'https://github.com/90sled/nmappy/'
+WEB_URL = 'https://github.com/bitsadmin/nmappy/'
 
 
 def validate_file(value):
