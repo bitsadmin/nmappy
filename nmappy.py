@@ -13,7 +13,7 @@ from datetime import datetime
 from netaddr import *
 
 VERSION = 0.51
-WEB_URL = 'https://github.com/90sled/nmappy/'
+WEB_URL = 'https://github.com/bitsadmin/nmappy/'
 MAX_RESULTS_DISPLAY = 30
 ALL_SERVICES_INCLUDED = False
 
