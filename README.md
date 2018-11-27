@@ -70,7 +70,7 @@ optional arguments:
 ```
 
 ### TopPorts
-_Utility to obtain the top X ports from the nmap-services file_
+_Utility to obtain the top X ports from the nmap-services file._
 
 This is for example useful when you want to use Cobalt Strike to run a portscan on the top 10 TCP ports.
 
