@@ -2,6 +2,7 @@
 ## Files
 * nmappy.py - Python implementation of Nmap
 * include-services.py - Utility to integrate list top services from the nmap-services file into the nmappy.py file
+* topports.py - Utility to obtain the top X ports from the nmap-services file
 * nmap-services - Copy from https://github.com/nmap/nmap
 
 ## Tools
@@ -66,6 +67,19 @@ optional arguments:
   -i NUMBER, --include NUMBER
                         Number of TCP and UDP services to include (default:
                         50). Use -1 for all.
+```
+
+### TopPorts
+_Utility to obtain the top X ports from the nmap-services file_
+
+This is for example useful when you want to use Cobalt Strike to run a portscan on the top 10 TCP ports.
+
+**Commandline**
+```
+usage: topports.py [top # of ports] [optional: tcp|udp]
+example: topports.py 10 tcp
+
+TopPorts v1.0 ( https://github.com/bitsadmin/nmappy/ )
 ```
 
 ## PyInstaller
